@@ -1,0 +1,69 @@
+"""
+관심종목 대시보드 설정.
+- WATCHLIST는 watchlist.json에서 동적으로 로드합니다.
+- 종목 추가/삭제는 대시보드 UI에서 가능합니다.
+"""
+
+import json
+from pathlib import Path
+
+_WATCHLIST_FILE = Path(__file__).parent / "watchlist.json"
+
+
+def load_watchlist() -> dict:
+    """watchlist.json에서 관심종목 로드."""
+    if _WATCHLIST_FILE.exists():
+        with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_watchlist(watchlist: dict):
+    """관심종목을 watchlist.json에 저장."""
+    with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
+        json.dump(watchlist, f, ensure_ascii=False, indent=4)
+
+
+def add_stock(ticker: str, name: str, sector: str):
+    """종목을 특정 섹터에 추가."""
+    wl = load_watchlist()
+    if sector not in wl:
+        wl[sector] = {}
+    wl[sector][ticker] = name
+    save_watchlist(wl)
+
+
+def remove_stock(ticker: str):
+    """종목코드로 종목 삭제 (어느 섹터에 있든)."""
+    wl = load_watchlist()
+    for sector in wl:
+        if ticker in wl[sector]:
+            del wl[sector][ticker]
+            # 섹터가 비었으면 섹터도 삭제
+            if not wl[sector]:
+                del wl[sector]
+            break
+    save_watchlist(wl)
+
+
+WATCHLIST = load_watchlist()
+
+# =========================================================================
+# 시그널 파라미터 (단기 스윙 - RSI(14) + 5/20일 이평 크로스)
+# =========================================================================
+
+# RSI 기준
+RSI_PERIOD = 14
+RSI_OVERSOLD = 30   # 이 아래면 과매도 (매수 관심)
+RSI_OVERBOUGHT = 70 # 이 위면 과매수 (매도 관심)
+
+# 이동평균 (단기 스윙 기준)
+MA_SHORT = 5   # 단기 이평
+MA_LONG = 20   # 중기 이평
+MA_TREND = 60  # 추세 확인용
+
+# 데이터 조회 기간 (이평/RSI 계산용 - 충분한 영업일 확보)
+LOOKBACK_DAYS = 180  # 약 6개월치 (영업일 기준 약 120일)
+
+# 캐시 시간 (초) - 5분
+CACHE_TTL = 300
