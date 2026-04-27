@@ -533,18 +533,23 @@ for sector, stocks in all_results.items():
         },
     )
 
-    # 빠른 삭제 버튼 (삭제 후 바로 새로고침 안 함 — 여러 개 삭제 후 수동 새로고침)
+    # 빠른 삭제 — 체크박스로 선택 후 삭제 버튼 (새로고침 최소화)
     stock_names = [(t, i["name"]) for t, i in stocks.items() if is_valid_ticker(t)]
     if stock_names:
         cols = st.columns(min(len(stock_names), 6))
+        to_delete = []
         for idx, (tkr, nm) in enumerate(stock_names):
             col_idx = idx % min(len(stock_names), 6)
             with cols[col_idx]:
-                if st.button(f"🗑 {nm}", key=f"del_{sector}_{tkr}", help=f"{nm} ({tkr}) 삭제"):
+                if st.checkbox(f"🗑 {nm}", key=f"chk_{sector}_{tkr}", value=False):
+                    to_delete.append((tkr, nm))
+        if to_delete:
+            if st.button(f"🗑️ 선택한 {len(to_delete)}개 종목 삭제", key=f"batch_del_{sector}"):
+                for tkr, nm in to_delete:
                     config.remove_stock(tkr)
-                    config.WATCHLIST = config.load_watchlist()
-                    st.cache_data.clear()
-                    st.toast(f"'{nm}' 삭제 완료. 새로고침 시 반영됩니다.", icon="🗑️")
+                st.cache_data.clear()
+                config.WATCHLIST = config.load_watchlist()
+                st.rerun()
 
     # 종목별 최신뉴스 (펼치기)
     news_items = []
