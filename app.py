@@ -533,7 +533,7 @@ for sector, stocks in all_results.items():
         },
     )
 
-    # 빠른 삭제 버튼
+    # 빠른 삭제 버튼 (삭제 후 바로 새로고침 안 함 — 여러 개 삭제 후 수동 새로고침)
     stock_names = [(t, i["name"]) for t, i in stocks.items() if is_valid_ticker(t)]
     if stock_names:
         cols = st.columns(min(len(stock_names), 6))
@@ -544,7 +544,7 @@ for sector, stocks in all_results.items():
                     config.remove_stock(tkr)
                     config.WATCHLIST = config.load_watchlist()
                     st.cache_data.clear()
-                    st.rerun()
+                    st.toast(f"'{nm}' 삭제 완료. 새로고침 시 반영됩니다.", icon="🗑️")
 
     # 종목별 최신뉴스 (펼치기)
     news_items = []
