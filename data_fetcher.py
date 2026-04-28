@@ -42,10 +42,14 @@ def get_ohlcv_cached(ticker: str, lookback_days: int = 180) -> pd.DataFrame | No
     today_str = datetime.now().strftime("%Y%m%d")
     cache_file = CACHE_DIR / f"{ticker}_{today_str}.parquet"
 
-    # 오늘자 캐시가 있으면 재사용
+    # 캐시 확인 — 장중이면 15분 경과 시 재갱신
     if cache_file.exists():
         try:
-            return pd.read_parquet(cache_file)
+            cache_age_sec = time.time() - cache_file.stat().st_mtime
+            if is_market_open() and cache_age_sec > 900:  # 15분
+                pass  # 캐시 만료 → 재호출
+            else:
+                return pd.read_parquet(cache_file)
         except Exception:
             pass  # 캐시 깨졌으면 다시 가져옴
 

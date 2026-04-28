@@ -167,7 +167,10 @@ col_a, col_b, col_c = st.columns([2, 2, 1])
 with col_a:
     st.caption(f"현재: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {market_status}")
 with col_b:
-    st.caption("📌 데이터 출처: pykrx (KRX/네이버, 15~20분 지연 가능)")
+    if is_market_open():
+        st.caption("📌 데이터 출처: pykrx (KRX/네이버, 15~20분 지연 / 장중 15분마다 갱신)")
+    else:
+        st.caption("📌 데이터 출처: pykrx (KRX/네이버, 전일 종가 기준)")
 with col_c:
     # 삭제 대기열 초기화
     if "pending_deletes" not in st.session_state:
