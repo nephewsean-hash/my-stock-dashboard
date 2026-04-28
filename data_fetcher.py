@@ -414,6 +414,86 @@ def get_target_price(ticker: str) -> dict | None:
     return None
 
 
+def get_intraday_ohlcv(ticker: str, interval: int = 15) -> pd.DataFrame | None:
+    """
+    네이버 금융에서 분봉(15분/60분) OHLCV 데이터를 가져온다.
+
+    Args:
+        ticker: 종목코드 (6자리)
+        interval: 분봉 간격 (15 또는 60)
+
+    Returns:
+        DataFrame (시가, 고가, 저가, 종가, 거래량) 또는 None
+    """
+    import requests
+
+    if not is_valid_ticker(ticker):
+        return None
+
+    # 캐시: 장중 3분, 장외 1시간
+    cache_file = CACHE_DIR / f"{ticker}_m{interval}.parquet"
+    if cache_file.exists():
+        try:
+            cache_age = time.time() - cache_file.stat().st_mtime
+            ttl = 180 if is_market_open() else 3600
+            if cache_age < ttl:
+                return pd.read_parquet(cache_file)
+        except Exception:
+            pass
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        # 네이버 차트 API — 분봉 데이터
+        url = f"https://m.stock.naver.com/api/stock/{ticker}/chart"
+        count = 120 if interval == 15 else 80
+        params = {
+            "periodType": "minute",
+            "period": interval,
+            "count": count,
+        }
+        resp = requests.get(url, params=params, timeout=5, headers=headers)
+        if resp.status_code != 200:
+            return None
+
+        data = resp.json()
+        candles = data if isinstance(data, list) else data.get("priceInfos", data.get("chartDatas", []))
+        if not candles:
+            return None
+
+        rows = []
+        for c in candles:
+            try:
+                dt = c.get("localDate", "") + c.get("localTime", "")
+                rows.append({
+                    "날짜": dt,
+                    "시가": int(str(c.get("openPrice", 0)).replace(",", "")),
+                    "고가": int(str(c.get("highPrice", 0)).replace(",", "")),
+                    "저가": int(str(c.get("lowPrice", 0)).replace(",", "")),
+                    "종가": int(str(c.get("closePrice", 0)).replace(",", "")),
+                    "거래량": int(str(c.get("accumulatedTradingVolume", c.get("tradingVolume", 0))).replace(",", "")),
+                })
+            except (ValueError, TypeError):
+                continue
+
+        if not rows:
+            return None
+
+        df = pd.DataFrame(rows)
+        if "날짜" in df.columns and df["날짜"].str.len().max() >= 8:
+            df["날짜"] = pd.to_datetime(df["날짜"], format="mixed", errors="coerce")
+            df = df.set_index("날짜")
+        df = df.sort_index()
+
+        # 캐시 저장
+        df.to_parquet(cache_file)
+        time.sleep(0.2)
+        return df
+
+    except Exception as e:
+        print(f"[ERROR] 분봉 데이터 실패 ({ticker}, {interval}분): {e}")
+        return None
+
+
 def get_realtime_price(ticker: str) -> dict | None:
     """
     네이버 금융에서 현재가/등락률을 실시간으로 가져온다.

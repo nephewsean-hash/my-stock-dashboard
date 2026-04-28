@@ -23,6 +23,7 @@ from data_fetcher import (
     get_ohlcv_cached, is_market_open, is_valid_ticker,
     search_stock_by_name, get_stock_info, classify_sector,
     get_target_price, get_stock_news, get_realtime_price,
+    get_intraday_ohlcv,
 )
 from indicators import generate_signal
 
@@ -344,11 +345,23 @@ for sector, tickers in watchlist.items():
                 signal_data["current_price"] = rt["price"]
                 signal_data["change_pct"] = rt["change_pct"]
 
+        # 분봉 시그널 (15분/60분)
+        sig_15m = None
+        sig_60m = None
+        df_15m = get_intraday_ohlcv(ticker, 15)
+        if df_15m is not None and len(df_15m) >= config.MA_LONG + 2:
+            sig_15m = generate_signal(df_15m, config)
+        df_60m = get_intraday_ohlcv(ticker, 60)
+        if df_60m is not None and len(df_60m) >= config.MA_LONG + 2:
+            sig_60m = generate_signal(df_60m, config)
+
         all_results[sector][ticker] = {
             "name": name, "status": "OK",
             "target_price": target_price, "target_opinion": target_opinion,
             "target_broker_count": target_broker_count, "target_date": target_date,
             "news": news,
+            "sig_15m": sig_15m,
+            "sig_60m": sig_60m,
             **signal_data,
         }
 
@@ -504,11 +517,18 @@ for sect_idx, sector in enumerate(sector_keys):
                 config.WATCHLIST = config.load_watchlist()
                 st.rerun()
 
+    def _signal_badge(sig):
+        return {
+            "STRONG_BUY": "🟢 강력매수", "BUY": "🔵 매수", "HOLD": "🟡 보유",
+            "REDUCE": "🟠 비중축소", "SELL": "🔴 매도",
+        }.get(sig, "⚪ -")
+
     rows = []
     for ticker, info in stocks.items():
         empty_row = {
             "종목명": "", "코드": "", "목표가": "-", "현재가": "-", "등락률": "-",
             "RSI": "-", "매물대": "-", "괴리율": "-",
+            "15분": "-", "60분": "-",
             "시그널": "", "사유": "",
         }
         if info.get("status") == "TODO":
@@ -519,13 +539,7 @@ for sect_idx, sector in enumerate(sector_keys):
                          "현재가": "데이터없음", "시그널": "ERROR", "사유": "KRX 조회 실패"})
         else:
             signal = info["signal"]
-            badge = {
-                "STRONG_BUY": "🟢 강력매수",
-                "BUY": "🔵 매수",
-                "HOLD": "🟡 보유",
-                "REDUCE": "🟠 비중축소",
-                "SELL": "🔴 매도",
-            }.get(signal, "⚪ 중립")
+            badge = _signal_badge(signal)
             cp = info.get("current_price")
             vp_pos = info.get("vp_position", "")
             vp_poc_val = info.get("vp_poc")
@@ -557,6 +571,12 @@ for sect_idx, sector in enumerate(sector_keys):
                 target_str = "-"
                 gap_str = "-"
 
+            # 분봉 시그널
+            s15 = info.get("sig_15m")
+            s60 = info.get("sig_60m")
+            badge_15m = _signal_badge(s15["signal"]) if s15 else "-"
+            badge_60m = _signal_badge(s60["signal"]) if s60 else "-"
+
             rows.append({
                 "종목명": info["name"],
                 "코드": ticker,
@@ -566,6 +586,8 @@ for sect_idx, sector in enumerate(sector_keys):
                 "RSI": f"{info['rsi']:.1f}" if info.get("rsi") else "-",
                 "매물대": vp_label,
                 "괴리율": gap_str,
+                "15분": badge_15m,
+                "60분": badge_60m,
                 "시그널": badge,
                 "사유": info.get("signal_reason", ""),
             })
@@ -580,7 +602,9 @@ for sect_idx, sector in enumerate(sector_keys):
             "RSI": st.column_config.TextColumn("RSI", help="RSI(14): 30이하=과매도(매수기회), 70이상=과매수(매도고려)"),
             "매물대": st.column_config.TextColumn("매물대", help="돌파↑: 현재가가 거래량 밀집 구간 위 (지지선 확보)\n이탈↓: 거래량 밀집 구간 아래 (지지선 붕괴)\n상단/하단→: 구간 내 위치\n숫자: POC(최대 거래량 가격대)"),
             "괴리율": st.column_config.TextColumn("괴리율", help="+값: 현재가가 목표가보다 낮음 (상승 여력)\n-값: 현재가가 목표가 초과 (고평가 가능성)"),
-            "시그널": st.column_config.TextColumn("시그널", help="🟢강력매수 🔵매수 🟡보유 🟠비중축소 🔴매도\nRSI+EMA+VWAP+매물대 종합 분석"),
+            "15분": st.column_config.TextColumn("15분", help="15분봉 기준 시그널 (단타/스윙)"),
+            "60분": st.column_config.TextColumn("60분", help="60분봉 기준 시그널 (스윙)"),
+            "시그널": st.column_config.TextColumn("일봉", help="일봉 기준 시그널\n🟢강력매수 🔵매수 🟡보유 🟠비중축소 🔴매도\nRSI+EMA+VWAP+매물대 종합 분석"),
         },
     )
 
