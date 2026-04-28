@@ -176,6 +176,8 @@ with col_b:
 with col_c:
     if st.button("🔄 새로고침"):
         st.cache_data.clear()
+        if "all_results" in st.session_state:
+            del st.session_state.all_results
         config.WATCHLIST = config.load_watchlist()
         st.rerun()
 
@@ -289,74 +291,94 @@ with st.expander("🔍 종목 검색 & 추가 / 삭제", expanded=False):
             st.info("등록된 종목이 없습니다.")
 
 # -----------------------------------------------------------------
-# 1단계: 모든 종목 시그널 계산
+# 1단계: 모든 종목 시그널 계산 (session_state 캐싱)
 # -----------------------------------------------------------------
-all_results = {}
+watchlist = config.load_watchlist()
 todo_list = []
 error_list = []
 
-watchlist = config.load_watchlist()
+# 새로고침 버튼으로 캐시 클리어 시에만 전체 재로딩
+need_full_load = "all_results" not in st.session_state
 
-progress_bar = st.progress(0, text="데이터 불러오는 중...")
-total_count = sum(len(tickers) for tickers in watchlist.values())
-counter = 0
+if need_full_load:
+    all_results = {}
 
-for sector, tickers in watchlist.items():
-    all_results[sector] = {}
-    for ticker, name in tickers.items():
-        counter += 1
-        progress_bar.progress(counter / total_count, text=f"{name} 계산 중...")
+    progress_bar = st.progress(0, text="데이터 불러오는 중...")
+    total_count = sum(len(tickers) for tickers in watchlist.values())
+    counter = 0
 
-        if not is_valid_ticker(ticker):
-            # TODO_VERIFY 종목
-            todo_list.append((sector, ticker, name))
-            all_results[sector][ticker] = {"name": name, "status": "TODO"}
-            continue
+    for sector, tickers in watchlist.items():
+        all_results[sector] = {}
+        for ticker, name in tickers.items():
+            counter += 1
+            progress_bar.progress(counter / total_count, text=f"{name} 계산 중...")
 
-        signal_data = load_stock_data(ticker)
-        if signal_data is None:
-            error_list.append((sector, ticker, name))
-            all_results[sector][ticker] = {"name": name, "status": "ERROR"}
-            continue
+            if not is_valid_ticker(ticker):
+                todo_list.append((sector, ticker, name))
+                all_results[sector][ticker] = {"name": name, "status": "TODO"}
+                continue
 
-        # 증권사 목표가 조회
-        target_info = get_target_price(ticker)
-        target_price = target_info["target_price"] if target_info else None
-        target_opinion = target_info.get("opinion", "") if target_info else ""
-        target_broker_count = target_info.get("broker_count", 0) if target_info else 0
-        target_date = target_info.get("report_date", "") if target_info else ""
+            signal_data = load_stock_data(ticker)
+            if signal_data is None:
+                error_list.append((sector, ticker, name))
+                all_results[sector][ticker] = {"name": name, "status": "ERROR"}
+                continue
 
-        # 최신 뉴스 조회
-        news = get_stock_news(ticker, count=3)
+            # 증권사 목표가 조회
+            target_info = get_target_price(ticker)
+            target_price = target_info["target_price"] if target_info else None
+            target_opinion = target_info.get("opinion", "") if target_info else ""
+            target_broker_count = target_info.get("broker_count", 0) if target_info else 0
+            target_date = target_info.get("report_date", "") if target_info else ""
 
-        # 장중이면 네이버에서 실시간 현재가 반영
-        if is_market_open():
-            rt = get_realtime_price(ticker)
-            if rt:
-                signal_data["current_price"] = rt["price"]
-                signal_data["change_pct"] = rt["change_pct"]
+            # 최신 뉴스 조회
+            news = get_stock_news(ticker, count=3)
 
-        # 분봉 시그널 (15분/60분)
-        sig_15m = None
-        sig_60m = None
-        df_15m = get_intraday_ohlcv(ticker, 15)
-        if df_15m is not None and len(df_15m) >= config.MA_LONG + 2:
-            sig_15m = generate_signal(df_15m, config)
-        df_60m = get_intraday_ohlcv(ticker, 60)
-        if df_60m is not None and len(df_60m) >= config.MA_LONG + 2:
-            sig_60m = generate_signal(df_60m, config)
+            # 장중이면 네이버에서 실시간 현재가 반영
+            if is_market_open():
+                rt = get_realtime_price(ticker)
+                if rt:
+                    signal_data["current_price"] = rt["price"]
+                    signal_data["change_pct"] = rt["change_pct"]
 
-        all_results[sector][ticker] = {
-            "name": name, "status": "OK",
-            "target_price": target_price, "target_opinion": target_opinion,
-            "target_broker_count": target_broker_count, "target_date": target_date,
-            "news": news,
-            "sig_15m": sig_15m,
-            "sig_60m": sig_60m,
-            **signal_data,
-        }
+            # 분봉 시그널 (15분/60분)
+            sig_15m = None
+            sig_60m = None
+            df_15m = get_intraday_ohlcv(ticker, 15)
+            if df_15m is not None and len(df_15m) >= config.MA_LONG + 2:
+                sig_15m = generate_signal(df_15m, config)
+            df_60m = get_intraday_ohlcv(ticker, 60)
+            if df_60m is not None and len(df_60m) >= config.MA_LONG + 2:
+                sig_60m = generate_signal(df_60m, config)
 
-progress_bar.empty()
+            all_results[sector][ticker] = {
+                "name": name, "status": "OK",
+                "target_price": target_price, "target_opinion": target_opinion,
+                "target_broker_count": target_broker_count, "target_date": target_date,
+                "news": news,
+                "sig_15m": sig_15m,
+                "sig_60m": sig_60m,
+                **signal_data,
+            }
+
+    progress_bar.empty()
+    st.session_state.all_results = all_results
+else:
+    # 삭제 등으로 rerun된 경우: 캐시된 결과에서 삭제된 종목만 제거
+    cached = st.session_state.all_results
+    all_results = {}
+    wl_tickers = set()
+    for tickers in watchlist.values():
+        wl_tickers.update(tickers.keys())
+    for sector, stocks in cached.items():
+        filtered = {t: info for t, info in stocks.items() if t in wl_tickers}
+        if filtered:
+            all_results[sector] = filtered
+    # watchlist에 새로 추가된 섹터가 있으면 반영
+    for sector in watchlist:
+        if sector not in all_results:
+            all_results[sector] = {}
+    st.session_state.all_results = all_results
 
 # -----------------------------------------------------------------
 # 2단계: 상단 시그널 알림 패널
