@@ -15,26 +15,43 @@ from pathlib import Path
 
 import pandas as pd
 from pykrx import stock
+from us_stocks import is_us_ticker
 
 CACHE_DIR = Path(__file__).parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
 
 def is_valid_ticker(ticker: str) -> bool:
-    """종목코드가 유효한 6자리 숫자인지 확인 (TODO_VERIFY 스킵용)."""
-    return ticker.isdigit() and len(ticker) == 6
+    """종목코드가 유효한지 확인 (한국: 6자리 숫자, 미국: 알파벳 1~5자)."""
+    return (ticker.isdigit() and len(ticker) == 6) or is_us_ticker(ticker)
+
+
+def _yf_to_kr_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """yfinance DataFrame 컬럼을 한국어로 변환."""
+    col_map = {}
+    for c in df.columns:
+        cl = c.lower()
+        if cl == "open":
+            col_map[c] = "시가"
+        elif cl == "high":
+            col_map[c] = "고가"
+        elif cl == "low":
+            col_map[c] = "저가"
+        elif cl in ("close", "adj close", "adj_close"):
+            col_map[c] = "종가"
+        elif cl == "volume":
+            col_map[c] = "거래량"
+    df = df.rename(columns=col_map)
+    for needed in ["시가", "고가", "저가", "종가", "거래량"]:
+        if needed not in df.columns:
+            return pd.DataFrame()
+    return df[["시가", "고가", "저가", "종가", "거래량"]]
 
 
 def get_ohlcv_cached(ticker: str, lookback_days: int = 180) -> pd.DataFrame | None:
     """
     종목의 일봉 OHLCV 데이터 가져오기 (캐시 적용).
-
-    Args:
-        ticker: 종목코드 (6자리)
-        lookback_days: 과거 며칠치 데이터 (기본 180일)
-
-    Returns:
-        DataFrame (날짜, 시가, 고가, 저가, 종가, 거래량) 또는 None
+    한국/미국 주식 모두 지원.
     """
     if not is_valid_ticker(ticker):
         return None
@@ -46,14 +63,17 @@ def get_ohlcv_cached(ticker: str, lookback_days: int = 180) -> pd.DataFrame | No
     if cache_file.exists():
         try:
             cache_age_sec = time.time() - cache_file.stat().st_mtime
-            if is_market_open() and cache_age_sec > 900:  # 15분
-                pass  # 캐시 만료 → 재호출
+            if is_market_open() and cache_age_sec > 900:
+                pass
             else:
                 return pd.read_parquet(cache_file)
         except Exception:
-            pass  # 캐시 깨졌으면 다시 가져옴
+            pass
 
-    # pykrx 호출
+    if is_us_ticker(ticker):
+        return _get_us_ohlcv(ticker, lookback_days, cache_file)
+
+    # pykrx 호출 (한국 주식)
     end_date = datetime.now()
     start_date = end_date - timedelta(days=lookback_days)
 
@@ -65,15 +85,33 @@ def get_ohlcv_cached(ticker: str, lookback_days: int = 180) -> pd.DataFrame | No
         )
         if df is None or df.empty:
             return None
-
-        # 캐시 저장
         df.to_parquet(cache_file)
-
-        # KRX 부하 방지 (공식 가이드: 1초 지연 권고)
         time.sleep(0.5)
         return df
     except Exception as e:
         print(f"[ERROR] {ticker} 데이터 가져오기 실패: {e}")
+        return None
+
+
+def _get_us_ohlcv(ticker: str, lookback_days: int, cache_file: Path) -> pd.DataFrame | None:
+    """yfinance로 미국 주식 일봉 OHLCV 가져오기."""
+    try:
+        import yfinance as yf
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=lookback_days)
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        if df is None or df.empty:
+            return None
+        # MultiIndex 컬럼 처리 (yfinance 0.2.30+)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df = _yf_to_kr_columns(df)
+        if df.empty:
+            return None
+        df.to_parquet(cache_file)
+        return df
+    except Exception as e:
+        print(f"[ERROR] US {ticker} 일봉 실패: {e}")
         return None
 
 
@@ -140,30 +178,36 @@ def _load_stock_list() -> dict:
 
 def search_stock_by_name(query: str) -> list[tuple[str, str]]:
     """
-    종목명으로 검색 (한글/영문 모두 지원).
-    pykrx 전체 종목 리스트에서 로컬 검색 (빠르고 정확).
+    종목명으로 검색 (한국 + 미국 주식).
     (종목코드, 종목명) 리스트 반환.
     """
+    from us_stocks import search_us_stock
+
     query = query.strip()
     if not query:
         return []
 
     results = []
-    stock_list = _load_stock_list()
 
+    # 한국 주식 검색
+    stock_list = _load_stock_list()
     q_lower = query.lower()
-    # 정확 매칭 우선
     for ticker, name in stock_list.items():
         if q_lower == name.lower():
             results.insert(0, (ticker, name))
         elif q_lower in name.lower():
             results.append((ticker, name))
-
-    # 종목코드로도 검색
     if query.isdigit():
         for ticker, name in stock_list.items():
             if query in ticker and (ticker, name) not in results:
                 results.append((ticker, name))
+
+    # 미국 주식 검색
+    us_results = search_us_stock(query)
+    for ticker, name in us_results:
+        display = f"🇺🇸 {name}"
+        if (ticker, display) not in results:
+            results.append((ticker, display))
 
     return results[:20]
 
@@ -540,6 +584,27 @@ def get_intraday_ohlcv(ticker: str, interval: int = 15) -> pd.DataFrame | None:
         except Exception:
             pass
 
+    # 미국 주식: yfinance
+    if is_us_ticker(ticker):
+        try:
+            import yfinance as yf
+            interval_str = f"{interval}m"
+            period = "7d" if interval == 15 else "30d"
+            df = yf.download(ticker, period=period, interval=interval_str, progress=False)
+            if df is None or df.empty:
+                return None
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df = _yf_to_kr_columns(df)
+            if df.empty:
+                return None
+            df.to_parquet(cache_file)
+            return df
+        except Exception as e:
+            print(f"[ERROR] US {ticker} 분봉 실패: {e}")
+            return None
+
+    # 한국 주식: 네이버 차트 API
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         # 15분봉: 7일치, 60분봉: 14일치 (MA20+2 확보)
@@ -593,11 +658,13 @@ def get_intraday_ohlcv(ticker: str, interval: int = 15) -> pd.DataFrame | None:
 
 def get_realtime_price(ticker: str) -> dict | None:
     """
-    네이버 금융에서 현재가/등락률을 실시간으로 가져온다.
-    Returns: {"price": int, "change_pct": float, "high": int, "low": int, "volume": int} or None
+    현재가/등락률을 실시간으로 가져온다.
+    한국: 네이버 금융, 미국: yfinance
     """
-    import requests
+    if is_us_ticker(ticker):
+        return _get_us_realtime_price(ticker)
 
+    import requests
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         url = f"https://m.stock.naver.com/api/stock/{ticker}/basic"
@@ -619,6 +686,27 @@ def get_realtime_price(ticker: str) -> dict | None:
                 }
     except Exception as e:
         print(f"[ERROR] 네이버 실시간 시세 실패 ({ticker}): {e}")
+    return None
+
+
+def _get_us_realtime_price(ticker: str) -> dict | None:
+    """yfinance로 미국 주식 현재가 조회."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        info = t.fast_info
+        price = round(float(info.last_price), 2)
+        prev = round(float(info.previous_close), 2)
+        change_pct = round((price - prev) / prev * 100, 2) if prev else 0
+        return {
+            "price": price,
+            "change_pct": change_pct,
+            "high": round(float(info.day_high), 2) if info.day_high else price,
+            "low": round(float(info.day_low), 2) if info.day_low else price,
+            "volume": int(info.last_volume) if info.last_volume else 0,
+        }
+    except Exception as e:
+        print(f"[ERROR] US 실시간 시세 실패 ({ticker}): {e}")
     return None
 
 

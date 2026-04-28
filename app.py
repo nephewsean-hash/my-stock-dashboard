@@ -146,10 +146,11 @@ st.markdown(
 @st.cache_data(ttl=config.CACHE_TTL, show_spinner=False)
 def load_stock_data(ticker: str):
     """종목 하나의 시그널 계산 (수급 데이터 포함)."""
+    from us_stocks import is_us_ticker as _is_us
     df = get_ohlcv_cached(ticker, config.LOOKBACK_DAYS)
     if df is None or df.empty:
         return None
-    inv = get_investor_data(ticker)
+    inv = None if _is_us(ticker) else get_investor_data(ticker)
     return generate_signal(df, config, investor_data=inv)
 
 
@@ -328,18 +329,22 @@ if need_full_load:
                 all_results[sector][ticker] = {"name": name, "status": "ERROR"}
                 continue
 
-            # 증권사 목표가 조회
-            target_info = get_target_price(ticker)
+            # 증권사 목표가 조회 (한국 주식만)
+            from us_stocks import is_us_ticker as _is_us
+            _is_us_stock = _is_us(ticker)
+            if _is_us_stock:
+                target_info = None
+                news = []
+            else:
+                target_info = get_target_price(ticker)
+                news = get_stock_news(ticker, count=3)
             target_price = target_info["target_price"] if target_info else None
             target_opinion = target_info.get("opinion", "") if target_info else ""
             target_broker_count = target_info.get("broker_count", 0) if target_info else 0
             target_date = target_info.get("report_date", "") if target_info else ""
 
-            # 최신 뉴스 조회
-            news = get_stock_news(ticker, count=3)
-
-            # 장중이면 네이버에서 실시간 현재가 반영
-            if is_market_open():
+            # 실시간 현재가 반영 (미국: 항상, 한국: 장중)
+            if _is_us_stock or is_market_open():
                 rt = get_realtime_price(ticker)
                 if rt:
                     signal_data["current_price"] = rt["price"]
@@ -635,7 +640,7 @@ for sect_idx, sector in enumerate(sector_keys):
                 "종목명": info["name"],
                 "코드": ticker,
                 "목표가": target_str,
-                "현재가": f"{cp:,}",
+                "현재가": f"${cp:,.2f}" if _is_us(ticker) else f"{cp:,}",
                 "등락률": f"{info['change_pct']:+.2f}%",
                 "RSI": f"{info['rsi']:.1f}" if info.get("rsi") else "-",
                 "매물대": vp_label,
