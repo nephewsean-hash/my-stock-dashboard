@@ -520,183 +520,165 @@ for sect_idx, sector in enumerate(sector_keys):
     stocks = all_results[sector]
     sector_display = sector.replace("_", " ")
 
-    # 섹터 헤더 + 순서 변경 + 이름 변경
-    hdr_col1, hdr_col2, hdr_col3 = st.columns([10, 1, 1])
-    with hdr_col1:
-        # 섹터명 변경 (popover)
-        with st.popover(sector_display, use_container_width=True):
-            new_name = st.text_input("섹터명 변경:", value=sector_display, key=f"rename_{sector}")
-            new_name_key = new_name.strip().replace(" ", "_")
-            if st.button("변경", key=f"rename_btn_{sector}"):
-                if new_name_key and new_name_key != sector:
-                    config.rename_sector(sector, new_name_key)
-                    config.WATCHLIST = config.load_watchlist()
-                    if "all_results" in st.session_state:
-                        ar = st.session_state.all_results
-                        if sector in ar:
-                            ar[new_name_key] = ar.pop(sector)
-                            st.session_state.all_results = ar
-                    st.rerun()
-    with hdr_col2:
-        if sect_idx > 0:
-            if st.button("⬆", key=f"up_{sector}", help="위로 이동"):
-                config.move_sector(sector, "up")
-                config.WATCHLIST = config.load_watchlist()
-                # session_state 순서도 업데이트
-                if "all_results" in st.session_state:
-                    wl = config.load_watchlist()
-                    ar = st.session_state.all_results
-                    reordered = {k: ar[k] for k in wl if k in ar}
-                    st.session_state.all_results = reordered
-                st.rerun()
-    with hdr_col3:
-        if sect_idx < len(sector_keys) - 1:
-            if st.button("⬇", key=f"down_{sector}", help="아래로 이동"):
-                config.move_sector(sector, "down")
-                config.WATCHLIST = config.load_watchlist()
-                if "all_results" in st.session_state:
-                    wl = config.load_watchlist()
-                    ar = st.session_state.all_results
-                    reordered = {k: ar[k] for k in wl if k in ar}
-                    st.session_state.all_results = reordered
-                st.rerun()
+    # 섹터 순서 이동 버튼 (expander 밖)
+    move_cols = st.columns([12, 1, 1])
+    with move_cols[1]:
+        if sect_idx > 0 and st.button("⬆", key=f"up_{sector}", help="위로 이동"):
+            config.move_sector(sector, "up")
+            config.WATCHLIST = config.load_watchlist()
+            if "all_results" in st.session_state:
+                wl = config.load_watchlist()
+                ar = st.session_state.all_results
+                st.session_state.all_results = {k: ar[k] for k in wl if k in ar}
+            st.rerun()
+    with move_cols[2]:
+        if sect_idx < len(sector_keys) - 1 and st.button("⬇", key=f"down_{sector}", help="아래로 이동"):
+            config.move_sector(sector, "down")
+            config.WATCHLIST = config.load_watchlist()
+            if "all_results" in st.session_state:
+                wl = config.load_watchlist()
+                ar = st.session_state.all_results
+                st.session_state.all_results = {k: ar[k] for k in wl if k in ar}
+            st.rerun()
 
-    def _signal_badge(sig):
-        return {
-            "STRONG_BUY": "🟢 강력매수", "BUY": "🔵 매수", "HOLD": "🟡 보유",
-            "REDUCE": "🟠 비중축소", "SELL": "🔴 매도",
-        }.get(sig, "⚪ -")
+    stock_count = len(stocks)
+    with st.expander(f"**{sector_display}** ({stock_count}종목)", expanded=True):
+        def _signal_badge(sig):
+            return {
+                "STRONG_BUY": "🟢 강력매수", "BUY": "🔵 매수", "HOLD": "🟡 보유",
+                "REDUCE": "🟠 비중축소", "SELL": "🔴 매도",
+            }.get(sig, "⚪ -")
 
-    rows = []
-    for ticker, info in stocks.items():
-        empty_row = {
-            "종목명": "", "코드": "", "목표가": "-", "현재가": "-", "등락률": "-",
-            "RSI": "-", "매물대": "-", "괴리율": "-",
-            "외국인": "-", "기관": "-",
-            "15분": "-", "60분": "-",
-            "시그널": "", "사유": "",
-        }
-        if info.get("status") == "TODO":
-            rows.append({**empty_row, "종목명": info["name"], "코드": "⚠️확인필요",
-                         "시그널": "TODO", "사유": "종목코드 확인 필요"})
-        elif info.get("status") == "ERROR":
-            rows.append({**empty_row, "종목명": info["name"], "코드": ticker,
-                         "현재가": "데이터없음", "시그널": "ERROR", "사유": "KRX 조회 실패"})
-        else:
-            signal = info["signal"]
-            badge = _signal_badge(signal)
-            cp = info.get("current_price")
-            vp_pos = info.get("vp_position", "")
-            vp_poc_val = info.get("vp_poc")
-            if vp_pos == "above" and vp_poc_val:
-                vp_label = f"돌파↑ 지지{vp_poc_val:,}"
-            elif vp_pos == "below" and vp_poc_val:
-                vp_label = f"이탈↓ 저항{vp_poc_val:,}"
-            elif vp_pos == "within" and vp_poc_val:
-                if cp and cp >= vp_poc_val:
-                    vp_label = f"상단→ 중심{vp_poc_val:,}"
-                else:
-                    vp_label = f"하단→ 중심{vp_poc_val:,}"
+        rows = []
+        for ticker, info in stocks.items():
+            empty_row = {
+                "종목명": "", "코드": "", "목표가": "-", "현재가": "-", "등락률": "-",
+                "RSI": "-", "매물대": "-", "괴리율": "-",
+                "외국인": "-", "기관": "-",
+                "15분": "-", "60분": "-",
+                "시그널": "", "사유": "",
+            }
+            if info.get("status") == "TODO":
+                rows.append({**empty_row, "종목명": info["name"], "코드": "⚠️확인필요",
+                             "시그널": "TODO", "사유": "종목코드 확인 필요"})
+            elif info.get("status") == "ERROR":
+                rows.append({**empty_row, "종목명": info["name"], "코드": ticker,
+                             "현재가": "데이터없음", "시그널": "ERROR", "사유": "KRX 조회 실패"})
             else:
-                vp_label = "-"
-
-            # 목표가 & 괴리율
-            tp = info.get("target_price")
-            tp_date = info.get("target_date", "")
-            if tp and cp:
-                gap_pct = ((tp - cp) / cp) * 100
-                tp_parts = [f"{tp:,}"]
-                if tp_date and len(tp_date) >= 10:
-                    # 2026-04-21 → (26.04.21)
-                    short_date = f"({tp_date[2:4]}.{tp_date[5:7]}.{tp_date[8:10]})"
-                    tp_parts.append(short_date)
-                target_str = " ".join(tp_parts)
-                gap_str = f"{gap_pct:+.1f}%"
-            else:
-                target_str = "-"
-                gap_str = "-"
-
-            # 분봉 시그널
-            s15 = info.get("sig_15m")
-            s60 = info.get("sig_60m")
-            badge_15m = _signal_badge(s15["signal"]) if s15 else "-"
-            badge_60m = _signal_badge(s60["signal"]) if s60 else "-"
-
-            # 외국인/기관 수급
-            f5 = info.get("foreign_net_5d", 0)
-            i5 = info.get("inst_net_5d", 0)
-            def _fmt_net(v):
-                if not v:
-                    return "-"
-                if abs(v) >= 1_000_000:
-                    return f"{v/1_000_000:+.1f}M"
-                elif abs(v) >= 1_000:
-                    return f"{v/1_000:+.0f}K"
-                return f"{v:+,}"
-
-            rows.append({
-                "종목명": info["name"],
-                "코드": ticker,
-                "목표가": target_str,
-                "현재가": f"${cp:,.2f}" if is_us_ticker(ticker) else f"{cp:,}",
-                "등락률": f"{info['change_pct']:+.2f}%",
-                "RSI": f"{info['rsi']:.1f}" if info.get("rsi") else "-",
-                "매물대": vp_label,
-                "괴리율": gap_str,
-                "외국인": _fmt_net(f5),
-                "기관": _fmt_net(i5),
-                "15분": badge_15m,
-                "60분": badge_60m,
-                "시그널": badge,
-                "사유": info.get("signal_reason", ""),
-            })
-
-    df_display = pd.DataFrame(rows)
-    st.dataframe(
-        df_display,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "목표가": st.column_config.TextColumn("목표가", help="증권사 컨센서스 평균 목표가 (업데이트 날짜)"),
-            "RSI": st.column_config.TextColumn("RSI", help="RSI(14): 30이하=과매도(매수기회), 70이상=과매수(매도고려)"),
-            "매물대": st.column_config.TextColumn("매물대", help="돌파↑: 현재가가 거래량 밀집 구간 위 (지지선 확보)\n이탈↓: 거래량 밀집 구간 아래 (지지선 붕괴)\n상단/하단→: 구간 내 위치\n숫자: POC(최대 거래량 가격대)"),
-            "괴리율": st.column_config.TextColumn("괴리율", help="+값: 현재가가 목표가보다 낮음 (상승 여력)\n-값: 현재가가 목표가 초과 (고평가 가능성)"),
-            "외국인": st.column_config.TextColumn("외국인", help="외국인 최근 5일 순매수량\n+: 순매수 / -: 순매도\nK=천주, M=백만주"),
-            "기관": st.column_config.TextColumn("기관", help="기관 최근 5일 순매수량\n+: 순매수 / -: 순매도\nK=천주, M=백만주"),
-            "15분": st.column_config.TextColumn("15분", help="15분봉 기준 시그널 (단타/스윙)"),
-            "60분": st.column_config.TextColumn("60분", help="60분봉 기준 시그널 (스윙)"),
-            "시그널": st.column_config.TextColumn("일봉", help="일봉 기준 시그널\n🟢강력매수 🔵매수 🟡보유 🟠비중축소 🔴매도\nRSI+EMA+VWAP+매물대 종합 분석"),
-        },
-    )
-
-    # 빠른 삭제 — 즉시 삭제 (JSON 저장 + 화면에서 제거, 전체 새로고침 없음)
-    stock_names = [(t, i["name"]) for t, i in stocks.items() if is_valid_ticker(t)]
-    if stock_names:
-        cols = st.columns(min(len(stock_names), 6))
-        for idx, (tkr, nm) in enumerate(stock_names):
-            col_idx = idx % min(len(stock_names), 6)
-            with cols[col_idx]:
-                if st.button(f"🗑 {nm}", key=f"del_{sector}_{tkr}"):
-                    config.remove_stock(tkr)
-                    config.WATCHLIST = config.load_watchlist()
-                    st.rerun()
-
-    # 종목별 최신뉴스 (펼치기)
-    news_items = []
-    for ticker, info in stocks.items():
-        if info.get("news"):
-            for n in info["news"]:
-                news_items.append((info["name"], n))
-
-    if news_items:
-        with st.expander(f"📰 {sector_display} 최신뉴스"):
-            for stock_name, n in news_items:
-                date_tag = f" ({n['date']})" if n.get("date") else ""
-                source_tag = f" — {n['source']}" if n.get("source") else ""
-                if n.get("url"):
-                    st.markdown(f"**{stock_name}** | [{n['title']}]({n['url']}){date_tag}{source_tag}")
+                signal = info["signal"]
+                badge = _signal_badge(signal)
+                cp = info.get("current_price")
+                vp_pos = info.get("vp_position", "")
+                vp_poc_val = info.get("vp_poc")
+                if vp_pos == "above" and vp_poc_val:
+                    vp_label = f"돌파↑ 지지{vp_poc_val:,}"
+                elif vp_pos == "below" and vp_poc_val:
+                    vp_label = f"이탈↓ 저항{vp_poc_val:,}"
+                elif vp_pos == "within" and vp_poc_val:
+                    if cp and cp >= vp_poc_val:
+                        vp_label = f"상단→ 중심{vp_poc_val:,}"
+                    else:
+                        vp_label = f"하단→ 중심{vp_poc_val:,}"
                 else:
-                    st.markdown(f"**{stock_name}** | {n['title']}{date_tag}{source_tag}")
+                    vp_label = "-"
+
+                # 목표가 & 괴리율
+                tp = info.get("target_price")
+                tp_date = info.get("target_date", "")
+                if tp and cp:
+                    gap_pct = ((tp - cp) / cp) * 100
+                    tp_parts = [f"{tp:,}"]
+                    if tp_date and len(tp_date) >= 10:
+                        # 2026-04-21 → (26.04.21)
+                        short_date = f"({tp_date[2:4]}.{tp_date[5:7]}.{tp_date[8:10]})"
+                        tp_parts.append(short_date)
+                    target_str = " ".join(tp_parts)
+                    gap_str = f"{gap_pct:+.1f}%"
+                else:
+                    target_str = "-"
+                    gap_str = "-"
+
+                # 분봉 시그널
+                s15 = info.get("sig_15m")
+                s60 = info.get("sig_60m")
+                badge_15m = _signal_badge(s15["signal"]) if s15 else "-"
+                badge_60m = _signal_badge(s60["signal"]) if s60 else "-"
+
+                # 외국인/기관 수급
+                f5 = info.get("foreign_net_5d", 0)
+                i5 = info.get("inst_net_5d", 0)
+                def _fmt_net(v):
+                    if not v:
+                        return "-"
+                    if abs(v) >= 1_000_000:
+                        return f"{v/1_000_000:+.1f}M"
+                    elif abs(v) >= 1_000:
+                        return f"{v/1_000:+.0f}K"
+                    return f"{v:+,}"
+
+                rows.append({
+                    "종목명": info["name"],
+                    "코드": ticker,
+                    "목표가": target_str,
+                    "현재가": f"${cp:,.2f}" if is_us_ticker(ticker) else f"{cp:,}",
+                    "등락률": f"{info['change_pct']:+.2f}%",
+                    "RSI": f"{info['rsi']:.1f}" if info.get("rsi") else "-",
+                    "매물대": vp_label,
+                    "괴리율": gap_str,
+                    "외국인": _fmt_net(f5),
+                    "기관": _fmt_net(i5),
+                    "15분": badge_15m,
+                    "60분": badge_60m,
+                    "시그널": badge,
+                    "사유": info.get("signal_reason", ""),
+                })
+
+        df_display = pd.DataFrame(rows)
+        st.dataframe(
+            df_display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "목표가": st.column_config.TextColumn("목표가", help="증권사 컨센서스 평균 목표가 (업데이트 날짜)"),
+                "RSI": st.column_config.TextColumn("RSI", help="RSI(14): 30이하=과매도(매수기회), 70이상=과매수(매도고려)"),
+                "매물대": st.column_config.TextColumn("매물대", help="돌파↑: 현재가가 거래량 밀집 구간 위 (지지선 확보)\n이탈↓: 거래량 밀집 구간 아래 (지지선 붕괴)\n상단/하단→: 구간 내 위치\n숫자: POC(최대 거래량 가격대)"),
+                "괴리율": st.column_config.TextColumn("괴리율", help="+값: 현재가가 목표가보다 낮음 (상승 여력)\n-값: 현재가가 목표가 초과 (고평가 가능성)"),
+                "외국인": st.column_config.TextColumn("외국인", help="외국인 최근 5일 순매수량\n+: 순매수 / -: 순매도\nK=천주, M=백만주"),
+                "기관": st.column_config.TextColumn("기관", help="기관 최근 5일 순매수량\n+: 순매수 / -: 순매도\nK=천주, M=백만주"),
+                "15분": st.column_config.TextColumn("15분", help="15분봉 기준 시그널 (단타/스윙)"),
+                "60분": st.column_config.TextColumn("60분", help="60분봉 기준 시그널 (스윙)"),
+                "시그널": st.column_config.TextColumn("일봉", help="일봉 기준 시그널\n🟢강력매수 🔵매수 🟡보유 🟠비중축소 🔴매도\nRSI+EMA+VWAP+매물대 종합 분석"),
+            },
+        )
+
+        # 빠른 삭제 — 즉시 삭제 (JSON 저장 + 화면에서 제거, 전체 새로고침 없음)
+        stock_names = [(t, i["name"]) for t, i in stocks.items() if is_valid_ticker(t)]
+        if stock_names:
+            cols = st.columns(min(len(stock_names), 6))
+            for idx, (tkr, nm) in enumerate(stock_names):
+                col_idx = idx % min(len(stock_names), 6)
+                with cols[col_idx]:
+                    if st.button(f"🗑 {nm}", key=f"del_{sector}_{tkr}"):
+                        config.remove_stock(tkr)
+                        config.WATCHLIST = config.load_watchlist()
+                        st.rerun()
+
+        # 종목별 최신뉴스 (펼치기)
+        news_items = []
+        for ticker, info in stocks.items():
+            if info.get("news"):
+                for n in info["news"]:
+                    news_items.append((info["name"], n))
+
+        if news_items:
+            with st.expander(f"📰 {sector_display} 최신뉴스"):
+                for stock_name, n in news_items:
+                    date_tag = f" ({n['date']})" if n.get("date") else ""
+                    source_tag = f" — {n['source']}" if n.get("source") else ""
+                    if n.get("url"):
+                        st.markdown(f"**{stock_name}** | [{n['title']}]({n['url']}){date_tag}{source_tag}")
+                    else:
+                        st.markdown(f"**{stock_name}** | {n['title']}{date_tag}{source_tag}")
 
 # -----------------------------------------------------------------
 # 하단 안내
