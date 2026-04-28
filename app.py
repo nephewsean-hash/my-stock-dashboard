@@ -254,6 +254,8 @@ with st.expander("🔍 종목 검색 & 추가 / 삭제", expanded=False):
                         config.add_stock(sel_ticker, sel_name, auto_sector)
                         config.WATCHLIST = config.load_watchlist()
                         st.cache_data.clear()
+                        if "all_results" in st.session_state:
+                            del st.session_state.all_results
                         st.rerun()
 
                 # 섹터 직접 지정 (옵션)
@@ -271,6 +273,8 @@ with st.expander("🔍 종목 검색 & 추가 / 삭제", expanded=False):
                             config.add_stock(sel_ticker, sel_name, final_sector)
                             config.WATCHLIST = config.load_watchlist()
                             st.cache_data.clear()
+                            if "all_results" in st.session_state:
+                                del st.session_state.all_results
                             st.rerun()
             else:
                 st.error("해당 종목을 찾을 수 없습니다.")
