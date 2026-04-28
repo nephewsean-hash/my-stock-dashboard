@@ -91,77 +91,81 @@ def clear_old_cache(keep_days: int = 3):
             continue
 
 
-def search_stock_by_name(query: str) -> list[tuple[str, str]]:
-    """
-    종목명으로 검색 (한글/영문 모두 지원).
-    1차: 네이버 자동완성 API (한글 검색에 강함)
-    2차: 네이버 모바일 검색 API (한글)
-    3차: 네이버 기본 API로 직접 조회 시도 (영문명 대응)
-    (종목코드, 종목명) 리스트 반환.
-    """
-    import requests
+_STOCK_LIST_CACHE = {}  # {ticker: name} 캐시
 
-    headers = {"User-Agent": "Mozilla/5.0"}
-    results = []
 
-    # 1차: 네이버증권 자동완성 API
+def _load_stock_list() -> dict:
+    """KOSPI+KOSDAQ 전체 종목 리스트 캐시 로드 (1일 1회)."""
+    global _STOCK_LIST_CACHE
+    cache_file = CACHE_DIR / "stock_list.json"
+
+    # 메모리 캐시
+    if _STOCK_LIST_CACHE:
+        return _STOCK_LIST_CACHE
+
+    # 파일 캐시 (오늘 날짜)
+    today_str = datetime.now().strftime("%Y%m%d")
+    if cache_file.exists():
+        try:
+            import json
+            cache_age = time.time() - cache_file.stat().st_mtime
+            if cache_age < 86400:  # 24시간
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    _STOCK_LIST_CACHE = json.load(f)
+                return _STOCK_LIST_CACHE
+        except Exception:
+            pass
+
+    # pykrx에서 전체 종목 로드
+    result = {}
     try:
-        url = "https://ac.finance.naver.com/ac"
-        params = {
-            "q": query, "q_enc": "utf-8", "t_koreng": "1",
-            "st": "111", "r_lt": "111", "r_format": "json",
-            "r_enc": "utf-8", "r_unicode": "0", "r_num": "20",
-        }
-        resp = requests.get(url, params=params, timeout=5, headers=headers)
-        data = resp.json()
-        items = data.get("items", [])
-        if items:
-            for item_list in items:
-                for entry in item_list:
-                    if len(entry) >= 2:
-                        name = entry[0][0] if isinstance(entry[0], list) else entry[0]
-                        ticker = entry[1][0] if isinstance(entry[1], list) else entry[1]
-                        if isinstance(ticker, str) and ticker.isdigit() and len(ticker) == 6:
-                            results.append((ticker, name))
-        if results:
-            return results
-    except Exception:
-        pass
-
-    # 2차: 네이버 모바일 검색 API
-    try:
-        url = f"https://m.stock.naver.com/api/json/search/searchListJson.nhn?keyword={query}"
-        resp = requests.get(url, timeout=5, headers=headers)
-        data = resp.json()
-        items = data.get("result", {}).get("d", [])
-        for item in items:
-            ticker = item.get("cd", "")
-            name = item.get("nm", "")
-            if ticker and name and len(ticker) == 6:
-                results.append((ticker, name))
-        if results:
-            return results
-    except Exception:
-        pass
-
-    # 3차: pykrx 전체 종목 리스트 (영문명 포함 검색)
-    try:
-        today_str = datetime.now().strftime("%Y%m%d")
         for market in ["KOSPI", "KOSDAQ"]:
             tickers = stock.get_market_ticker_list(today_str, market=market)
             for ticker in tickers:
                 name = stock.get_market_ticker_name(ticker)
-                if query.lower() in name.lower():
-                    results.append((ticker, name))
-        if results:
-            return results
-    except Exception:
-        pass
+                if name:
+                    result[ticker] = name
+            time.sleep(0.3)
+    except Exception as e:
+        print(f"[ERROR] 종목 리스트 로드 실패: {e}")
 
-    # 4차: 영문명 직접 매칭 시도 (네이버 basic API로 하나씩 확인은 비효율적이므로
-    # 흔한 영문 종목명을 직접 매핑)
-    # 사용자가 영문으로 검색 시 → 종목코드 직접 입력을 안내
-    return results
+    if result:
+        import json
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False)
+        _STOCK_LIST_CACHE = result
+
+    return result
+
+
+def search_stock_by_name(query: str) -> list[tuple[str, str]]:
+    """
+    종목명으로 검색 (한글/영문 모두 지원).
+    pykrx 전체 종목 리스트에서 로컬 검색 (빠르고 정확).
+    (종목코드, 종목명) 리스트 반환.
+    """
+    query = query.strip()
+    if not query:
+        return []
+
+    results = []
+    stock_list = _load_stock_list()
+
+    q_lower = query.lower()
+    # 정확 매칭 우선
+    for ticker, name in stock_list.items():
+        if q_lower == name.lower():
+            results.insert(0, (ticker, name))
+        elif q_lower in name.lower():
+            results.append((ticker, name))
+
+    # 종목코드로도 검색
+    if query.isdigit():
+        for ticker, name in stock_list.items():
+            if query in ticker and (ticker, name) not in results:
+                results.append((ticker, name))
+
+    return results[:20]
 
 
 def get_stock_name_by_ticker(ticker: str) -> str | None:
