@@ -414,9 +414,104 @@ def get_target_price(ticker: str) -> dict | None:
     return None
 
 
+def get_investor_data(ticker: str, days: int = 10) -> dict | None:
+    """
+    외국인/기관 순매수량 및 거래대금 조회 (pykrx).
+
+    Returns:
+        {
+            "foreign_net_5d": int,   # 외국인 최근 5일 순매수량
+            "inst_net_5d": int,      # 기관 최근 5일 순매수량
+            "foreign_net_today": int, # 외국인 당일 순매수량
+            "inst_net_today": int,    # 기관 당일 순매수량
+            "trading_value": int,    # 최근 거래대금 (백만원)
+        }
+    """
+    if not is_valid_ticker(ticker):
+        return None
+
+    # 캐시: 장중 10분, 장외 1시간
+    cache_file = CACHE_DIR / f"{ticker}_inv.json"
+    if cache_file.exists():
+        try:
+            cache_age = time.time() - cache_file.stat().st_mtime
+            ttl = 600 if is_market_open() else 3600
+            if cache_age < ttl:
+                import json
+                with open(cache_file, "r") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days + 10)  # 영업일 확보용 여유
+
+        df = stock.get_market_trading_volume_by_date(
+            start_date.strftime("%Y%m%d"),
+            end_date.strftime("%Y%m%d"),
+            ticker,
+        )
+        if df is None or df.empty:
+            return None
+
+        # 최근 5영업일
+        recent_5 = df.tail(5)
+        today_row = df.iloc[-1] if len(df) > 0 else None
+
+        # 외국인/기관 컬럼 찾기 (pykrx 버전에 따라 컬럼명 다름)
+        foreign_col = None
+        inst_col = None
+        for col in df.columns:
+            if "외국인" in str(col):
+                foreign_col = col
+            if "기관" in str(col) and "합계" in str(col):
+                inst_col = col
+            elif "기관" in str(col) and inst_col is None:
+                inst_col = col
+
+        foreign_net_5d = int(recent_5[foreign_col].sum()) if foreign_col else 0
+        inst_net_5d = int(recent_5[inst_col].sum()) if inst_col else 0
+        foreign_net_today = int(today_row[foreign_col]) if foreign_col and today_row is not None else 0
+        inst_net_today = int(today_row[inst_col]) if inst_col and today_row is not None else 0
+
+        # 거래대금 (pykrx OHLCV에서 가져오기)
+        trading_value = 0
+        try:
+            ohlcv = stock.get_market_ohlcv(
+                (end_date - timedelta(days=3)).strftime("%Y%m%d"),
+                end_date.strftime("%Y%m%d"),
+                ticker,
+            )
+            if ohlcv is not None and not ohlcv.empty and "거래대금" in ohlcv.columns:
+                trading_value = int(ohlcv["거래대금"].iloc[-1] / 1_000_000)  # 백만원 단위
+        except Exception:
+            pass
+
+        result = {
+            "foreign_net_5d": foreign_net_5d,
+            "inst_net_5d": inst_net_5d,
+            "foreign_net_today": foreign_net_today,
+            "inst_net_today": inst_net_today,
+            "trading_value": trading_value,
+        }
+
+        # 캐시 저장
+        import json
+        with open(cache_file, "w") as f:
+            json.dump(result, f)
+
+        time.sleep(0.3)
+        return result
+
+    except Exception as e:
+        print(f"[ERROR] 수급 데이터 실패 ({ticker}): {e}")
+        return None
+
+
 def get_intraday_ohlcv(ticker: str, interval: int = 15) -> pd.DataFrame | None:
     """
-    네이버 금융에서 분봉(15분/60분) OHLCV 데이터를 가져온다.
+    네이버 금융 차트 API에서 분봉(15분/60분) OHLCV 데이터를 가져온다.
 
     Args:
         ticker: 종목코드 (6자리)
@@ -443,46 +538,44 @@ def get_intraday_ohlcv(ticker: str, interval: int = 15) -> pd.DataFrame | None:
 
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        # 네이버 차트 API — 분봉 데이터
-        url = f"https://m.stock.naver.com/api/stock/{ticker}/chart"
-        count = 120 if interval == 15 else 80
+        # 15분봉: 7일치, 60분봉: 14일치 (MA20+2 확보)
+        lookback = 7 if interval == 15 else 14
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=lookback)
+
+        url = f"https://api.stock.naver.com/chart/domestic/item/{ticker}/minute{interval}"
         params = {
-            "periodType": "minute",
-            "period": interval,
-            "count": count,
+            "startDateTime": start_dt.strftime("%Y%m%d090000"),
+            "endDateTime": end_dt.strftime("%Y%m%d153000"),
         }
         resp = requests.get(url, params=params, timeout=5, headers=headers)
         if resp.status_code != 200:
             return None
 
-        data = resp.json()
-        candles = data if isinstance(data, list) else data.get("priceInfos", data.get("chartDatas", []))
-        if not candles:
+        candles = resp.json()
+        if not isinstance(candles, list) or not candles:
             return None
 
         rows = []
         for c in candles:
             try:
-                dt = c.get("localDate", "") + c.get("localTime", "")
                 rows.append({
-                    "날짜": dt,
-                    "시가": int(str(c.get("openPrice", 0)).replace(",", "")),
-                    "고가": int(str(c.get("highPrice", 0)).replace(",", "")),
-                    "저가": int(str(c.get("lowPrice", 0)).replace(",", "")),
-                    "종가": int(str(c.get("closePrice", 0)).replace(",", "")),
-                    "거래량": int(str(c.get("accumulatedTradingVolume", c.get("tradingVolume", 0))).replace(",", "")),
+                    "날짜": c["localDateTime"],
+                    "시가": int(c["openPrice"]),
+                    "고가": int(c["highPrice"]),
+                    "저가": int(c["lowPrice"]),
+                    "종가": int(c["currentPrice"]),
+                    "거래량": int(c["accumulatedTradingVolume"]),
                 })
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, KeyError):
                 continue
 
         if not rows:
             return None
 
         df = pd.DataFrame(rows)
-        if "날짜" in df.columns and df["날짜"].str.len().max() >= 8:
-            df["날짜"] = pd.to_datetime(df["날짜"], format="mixed", errors="coerce")
-            df = df.set_index("날짜")
-        df = df.sort_index()
+        df["날짜"] = pd.to_datetime(df["날짜"], format="%Y%m%d%H%M%S", errors="coerce")
+        df = df.set_index("날짜").sort_index()
 
         # 캐시 저장
         df.to_parquet(cache_file)

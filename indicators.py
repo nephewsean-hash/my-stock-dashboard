@@ -144,7 +144,7 @@ def detect_cross(short_ma: pd.Series, long_ma: pd.Series) -> str:
     return "none"
 
 
-def generate_signal(ohlcv_df: pd.DataFrame, config_module) -> dict:
+def generate_signal(ohlcv_df: pd.DataFrame, config_module, investor_data: dict | None = None) -> dict:
     """
     종합 시그널 생성.
 
@@ -301,6 +301,34 @@ def generate_signal(ohlcv_df: pd.DataFrame, config_module) -> dict:
         score += 0.5
         reasons.append(f"🌡️ 20일선 대비 {ma20_diff_pct:.1f}% — 반등 기대")
 
+    # ⑦ 외국인/기관 수급 (investor_data가 있을 때만)
+    if investor_data:
+        f5 = investor_data.get("foreign_net_5d", 0)
+        i5 = investor_data.get("inst_net_5d", 0)
+        ft = investor_data.get("foreign_net_today", 0)
+        it = investor_data.get("inst_net_today", 0)
+
+        # 5일 누적 수급
+        if f5 > 0 and i5 > 0:
+            score += 1.5
+            reasons.append(f"🏦 외국인+기관 5일 쌍끌이 매수 (외 {f5:+,} / 기 {i5:+,})")
+        elif f5 > 0:
+            score += 0.5
+            reasons.append(f"🏦 외국인 5일 순매수 {f5:+,}")
+        elif i5 > 0:
+            score += 0.5
+            reasons.append(f"🏦 기관 5일 순매수 {i5:+,}")
+        elif f5 < 0 and i5 < 0:
+            score -= 1
+            warnings.append(f"🏦 외국인+기관 5일 쌍끌이 매도 (외 {f5:+,} / 기 {i5:+,})")
+
+        # 당일 수급 (보조 지표)
+        if ft > 0 and it > 0:
+            score += 0.5
+            reasons.append(f"📊 당일 외국인+기관 동시 매수")
+        elif ft < 0 and it < 0:
+            score -= 0.5
+
     # ================================================================
     # 최종 시그널 결정 (5단계)
     # ================================================================
@@ -323,7 +351,7 @@ def generate_signal(ohlcv_df: pd.DataFrame, config_module) -> dict:
 
     signal_reason = " / ".join(all_reasons) if all_reasons else "특이사항 없음"
 
-    return {
+    result = {
         "current_price": int(current_price),
         "change_pct": round(change_pct, 2),
         "rsi": round(latest_rsi, 1) if not pd.isna(latest_rsi) else None,
@@ -339,3 +367,10 @@ def generate_signal(ohlcv_df: pd.DataFrame, config_module) -> dict:
         "signal_reason": signal_reason,
         "score": round(score, 1),
     }
+    if investor_data:
+        result["foreign_net_5d"] = investor_data.get("foreign_net_5d", 0)
+        result["inst_net_5d"] = investor_data.get("inst_net_5d", 0)
+        result["foreign_net_today"] = investor_data.get("foreign_net_today", 0)
+        result["inst_net_today"] = investor_data.get("inst_net_today", 0)
+        result["trading_value"] = investor_data.get("trading_value", 0)
+    return result

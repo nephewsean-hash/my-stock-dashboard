@@ -23,7 +23,7 @@ from data_fetcher import (
     get_ohlcv_cached, is_market_open, is_valid_ticker,
     search_stock_by_name, get_stock_info, classify_sector,
     get_target_price, get_stock_news, get_realtime_price,
-    get_intraday_ohlcv,
+    get_intraday_ohlcv, get_investor_data,
 )
 from indicators import generate_signal
 
@@ -145,11 +145,12 @@ st.markdown(
 # =========================================================================
 @st.cache_data(ttl=config.CACHE_TTL, show_spinner=False)
 def load_stock_data(ticker: str):
-    """종목 하나의 시그널 계산."""
+    """종목 하나의 시그널 계산 (수급 데이터 포함)."""
     df = get_ohlcv_cached(ticker, config.LOOKBACK_DAYS)
     if df is None or df.empty:
         return None
-    return generate_signal(df, config)
+    inv = get_investor_data(ticker)
+    return generate_signal(df, config, investor_data=inv)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -528,6 +529,7 @@ for sect_idx, sector in enumerate(sector_keys):
         empty_row = {
             "종목명": "", "코드": "", "목표가": "-", "현재가": "-", "등락률": "-",
             "RSI": "-", "매물대": "-", "괴리율": "-",
+            "외국인": "-", "기관": "-",
             "15분": "-", "60분": "-",
             "시그널": "", "사유": "",
         }
@@ -577,6 +579,18 @@ for sect_idx, sector in enumerate(sector_keys):
             badge_15m = _signal_badge(s15["signal"]) if s15 else "-"
             badge_60m = _signal_badge(s60["signal"]) if s60 else "-"
 
+            # 외국인/기관 수급
+            f5 = info.get("foreign_net_5d", 0)
+            i5 = info.get("inst_net_5d", 0)
+            def _fmt_net(v):
+                if not v:
+                    return "-"
+                if abs(v) >= 1_000_000:
+                    return f"{v/1_000_000:+.1f}M"
+                elif abs(v) >= 1_000:
+                    return f"{v/1_000:+.0f}K"
+                return f"{v:+,}"
+
             rows.append({
                 "종목명": info["name"],
                 "코드": ticker,
@@ -586,6 +600,8 @@ for sect_idx, sector in enumerate(sector_keys):
                 "RSI": f"{info['rsi']:.1f}" if info.get("rsi") else "-",
                 "매물대": vp_label,
                 "괴리율": gap_str,
+                "외국인": _fmt_net(f5),
+                "기관": _fmt_net(i5),
                 "15분": badge_15m,
                 "60분": badge_60m,
                 "시그널": badge,
@@ -602,6 +618,8 @@ for sect_idx, sector in enumerate(sector_keys):
             "RSI": st.column_config.TextColumn("RSI", help="RSI(14): 30이하=과매도(매수기회), 70이상=과매수(매도고려)"),
             "매물대": st.column_config.TextColumn("매물대", help="돌파↑: 현재가가 거래량 밀집 구간 위 (지지선 확보)\n이탈↓: 거래량 밀집 구간 아래 (지지선 붕괴)\n상단/하단→: 구간 내 위치\n숫자: POC(최대 거래량 가격대)"),
             "괴리율": st.column_config.TextColumn("괴리율", help="+값: 현재가가 목표가보다 낮음 (상승 여력)\n-값: 현재가가 목표가 초과 (고평가 가능성)"),
+            "외국인": st.column_config.TextColumn("외국인", help="외국인 최근 5일 순매수량\n+: 순매수 / -: 순매도\nK=천주, M=백만주"),
+            "기관": st.column_config.TextColumn("기관", help="기관 최근 5일 순매수량\n+: 순매수 / -: 순매도\nK=천주, M=백만주"),
             "15분": st.column_config.TextColumn("15분", help="15분봉 기준 시그널 (단타/스윙)"),
             "60분": st.column_config.TextColumn("60분", help="60분봉 기준 시그널 (스윙)"),
             "시그널": st.column_config.TextColumn("일봉", help="일봉 기준 시그널\n🟢강력매수 🔵매수 🟡보유 🟠비중축소 🔴매도\nRSI+EMA+VWAP+매물대 종합 분석"),
