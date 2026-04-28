@@ -414,6 +414,37 @@ def get_target_price(ticker: str) -> dict | None:
     return None
 
 
+def get_realtime_price(ticker: str) -> dict | None:
+    """
+    네이버 금융에서 현재가/등락률을 실시간으로 가져온다.
+    Returns: {"price": int, "change_pct": float, "high": int, "low": int, "volume": int} or None
+    """
+    import requests
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        url = f"https://m.stock.naver.com/api/stock/{ticker}/basic"
+        resp = requests.get(url, timeout=3, headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            price = int(data.get("closePrice", "0").replace(",", ""))
+            change_pct = float(data.get("fluctuationsRatio", "0").replace(",", ""))
+            high = int(data.get("highPrice", "0").replace(",", ""))
+            low = int(data.get("lowPrice", "0").replace(",", ""))
+            volume = int(data.get("accumulatedTradingVolume", "0").replace(",", ""))
+            if price > 0:
+                return {
+                    "price": price,
+                    "change_pct": change_pct,
+                    "high": high,
+                    "low": low,
+                    "volume": volume,
+                }
+    except Exception as e:
+        print(f"[ERROR] 네이버 실시간 시세 실패 ({ticker}): {e}")
+    return None
+
+
 def is_market_open() -> bool:
     """한국 주식 장 시간 확인 (주말/공휴일 제외는 간이 판정).
     평일 09:00~15:30 만 True.

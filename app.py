@@ -22,7 +22,7 @@ import config
 from data_fetcher import (
     get_ohlcv_cached, is_market_open, is_valid_ticker,
     search_stock_by_name, get_stock_info, classify_sector,
-    get_target_price, get_stock_news,
+    get_target_price, get_stock_news, get_realtime_price,
 )
 from indicators import generate_signal
 
@@ -168,7 +168,7 @@ with col_a:
     st.caption(f"현재: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {market_status}")
 with col_b:
     if is_market_open():
-        st.caption("📌 데이터 출처: pykrx (KRX/네이버, 15~20분 지연 / 장중 15분마다 갱신)")
+        st.caption("📌 현재가: 네이버 금융 (실시간) | 지표: pykrx (장중 15분 갱신)")
     else:
         st.caption("📌 데이터 출처: pykrx (KRX/네이버, 전일 종가 기준)")
 with col_c:
@@ -336,6 +336,13 @@ for sector, tickers in watchlist.items():
 
         # 최신 뉴스 조회
         news = get_stock_news(ticker, count=3)
+
+        # 장중이면 네이버에서 실시간 현재가 반영
+        if is_market_open():
+            rt = get_realtime_price(ticker)
+            if rt:
+                signal_data["current_price"] = rt["price"]
+                signal_data["change_pct"] = rt["change_pct"]
 
         all_results[sector][ticker] = {
             "name": name, "status": "OK",
