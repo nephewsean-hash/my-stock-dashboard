@@ -619,12 +619,12 @@ def get_realtime_price(ticker: str) -> dict | None:
 
 
 def is_market_open() -> bool:
-    """한국 주식 장 시간 확인 (주말/공휴일 제외는 간이 판정).
-    평일 09:00~15:30 만 True.
-    주의: 공휴일은 별도 체크 안 함 (과도한 호출 최소화용 간이 판정).
+    """한국 주식 장 시간 확인 (정규장 + 시간외 포함).
+    평일 09:00~18:00 (정규장 09:00~15:30, 시간외 15:40~18:00).
+    주의: 공휴일은 별도 체크 안 함.
     """
     now = datetime.now()
     if now.weekday() >= 5:  # 토/일
         return False
     hour_minute = now.hour * 100 + now.minute
-    return 900 <= hour_minute <= 1530
+    return 900 <= hour_minute <= 1800

@@ -164,7 +164,11 @@ def cached_search(query: str):
 # =========================================================================
 st.title("📈 나의 관심종목")
 
-market_status = "🟢 장중" if is_market_open() else "🔴 장외"
+if is_market_open():
+    now_hm = datetime.now().hour * 100 + datetime.now().minute
+    market_status = "🟢 장중" if now_hm <= 1530 else "🟡 시간외"
+else:
+    market_status = "🔴 장외"
 col_a, col_b, col_c = st.columns([2, 2, 1])
 with col_a:
     st.caption(f"현재: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {market_status}")
