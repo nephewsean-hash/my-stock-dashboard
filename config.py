@@ -5,21 +5,33 @@
 """
 
 import json
+import shutil
 from pathlib import Path
 
-_WATCHLIST_FILE = Path(__file__).parent / "watchlist.json"
+# 기본 watchlist (git에 포함, 초기 템플릿)
+_WATCHLIST_DEFAULT = Path(__file__).parent / "watchlist.json"
+# 사용자 수정본 (git에 미포함, 삭제/추가가 유지됨)
+_WATCHLIST_FILE = Path(__file__).parent / "watchlist_user.json"
 
 
 def load_watchlist() -> dict:
-    """watchlist.json에서 관심종목 로드."""
+    """관심종목 로드. 사용자 수정본 우선, 없으면 기본 파일에서 복사."""
     if _WATCHLIST_FILE.exists():
+        try:
+            with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # 사용자 파일 없으면 기본 파일에서 복사
+    if _WATCHLIST_DEFAULT.exists():
+        shutil.copy2(_WATCHLIST_DEFAULT, _WATCHLIST_FILE)
         with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {}
 
 
 def save_watchlist(watchlist: dict):
-    """관심종목을 watchlist.json에 저장."""
+    """관심종목을 사용자 파일에 저장."""
     with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
         json.dump(watchlist, f, ensure_ascii=False, indent=4)
 

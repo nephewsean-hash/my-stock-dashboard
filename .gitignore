@@ -5,3 +5,4 @@ cache/
 .streamlit/secrets.toml
 .env
 .DS_Store
+watchlist_user.json
