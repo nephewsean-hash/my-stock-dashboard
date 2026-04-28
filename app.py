@@ -26,6 +26,7 @@ from data_fetcher import (
     get_intraday_ohlcv, get_investor_data,
 )
 from indicators import generate_signal
+from us_stocks import is_us_ticker
 
 # =========================================================================
 # 페이지 설정
@@ -146,11 +147,10 @@ st.markdown(
 @st.cache_data(ttl=config.CACHE_TTL, show_spinner=False)
 def load_stock_data(ticker: str):
     """종목 하나의 시그널 계산 (수급 데이터 포함)."""
-    from us_stocks import is_us_ticker as _is_us
     df = get_ohlcv_cached(ticker, config.LOOKBACK_DAYS)
     if df is None or df.empty:
         return None
-    inv = None if _is_us(ticker) else get_investor_data(ticker)
+    inv = None if is_us_ticker(ticker) else get_investor_data(ticker)
     return generate_signal(df, config, investor_data=inv)
 
 
@@ -330,9 +330,7 @@ if need_full_load:
                 continue
 
             # 증권사 목표가 조회 (한국 주식만)
-            from us_stocks import is_us_ticker as _is_us
-            _is_us_stock = _is_us(ticker)
-            if _is_us_stock:
+            if is_us_ticker(ticker):
                 target_info = None
                 news = []
             else:
@@ -344,7 +342,7 @@ if need_full_load:
             target_date = target_info.get("report_date", "") if target_info else ""
 
             # 실시간 현재가 반영 (미국: 항상, 한국: 장중)
-            if _is_us_stock or is_market_open():
+            if is_us_ticker(ticker) or is_market_open():
                 rt = get_realtime_price(ticker)
                 if rt:
                     signal_data["current_price"] = rt["price"]
@@ -640,7 +638,7 @@ for sect_idx, sector in enumerate(sector_keys):
                 "종목명": info["name"],
                 "코드": ticker,
                 "목표가": target_str,
-                "현재가": f"${cp:,.2f}" if _is_us(ticker) else f"{cp:,}",
+                "현재가": f"${cp:,.2f}" if is_us_ticker(ticker) else f"{cp:,}",
                 "등락률": f"{info['change_pct']:+.2f}%",
                 "RSI": f"{info['rsi']:.1f}" if info.get("rsi") else "-",
                 "매물대": vp_label,
