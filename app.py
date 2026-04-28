@@ -475,9 +475,27 @@ st.warning(
 # -----------------------------------------------------------------
 # 3단계: 섹터별 종목 테이블
 # -----------------------------------------------------------------
-for sector, stocks in all_results.items():
+sector_keys = list(all_results.keys())
+for sect_idx, sector in enumerate(sector_keys):
+    stocks = all_results[sector]
     sector_display = sector.replace("_", " ")
-    st.markdown(f'<div class="sector-header">{sector_display}</div>', unsafe_allow_html=True)
+
+    # 섹터 헤더 + 순서 변경 버튼
+    hdr_col1, hdr_col2, hdr_col3 = st.columns([10, 1, 1])
+    with hdr_col1:
+        st.markdown(f'<div class="sector-header">{sector_display}</div>', unsafe_allow_html=True)
+    with hdr_col2:
+        if sect_idx > 0:
+            if st.button("⬆", key=f"up_{sector}", help="위로 이동"):
+                config.move_sector(sector, "up")
+                config.WATCHLIST = config.load_watchlist()
+                st.rerun()
+    with hdr_col3:
+        if sect_idx < len(sector_keys) - 1:
+            if st.button("⬇", key=f"down_{sector}", help="아래로 이동"):
+                config.move_sector(sector, "down")
+                config.WATCHLIST = config.load_watchlist()
+                st.rerun()
 
     rows = []
     for ticker, info in stocks.items():

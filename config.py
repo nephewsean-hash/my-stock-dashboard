@@ -46,6 +46,23 @@ def remove_stock(ticker: str):
     save_watchlist(wl)
 
 
+def move_sector(sector: str, direction: str):
+    """섹터 순서를 위(up) 또는 아래(down)로 이동."""
+    wl = load_watchlist()
+    keys = list(wl.keys())
+    if sector not in keys:
+        return
+    idx = keys.index(sector)
+    if direction == "up" and idx > 0:
+        keys[idx], keys[idx - 1] = keys[idx - 1], keys[idx]
+    elif direction == "down" and idx < len(keys) - 1:
+        keys[idx], keys[idx + 1] = keys[idx + 1], keys[idx]
+    else:
+        return
+    new_wl = {k: wl[k] for k in keys}
+    save_watchlist(new_wl)
+
+
 WATCHLIST = load_watchlist()
 
 # =========================================================================
