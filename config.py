@@ -75,6 +75,21 @@ def move_sector(sector: str, direction: str):
     save_watchlist(new_wl)
 
 
+def rename_sector(old_name: str, new_name: str):
+    """섹터명 변경."""
+    wl = load_watchlist()
+    if old_name not in wl or not new_name or old_name == new_name:
+        return
+    # 순서 유지하며 키 변경
+    new_wl = {}
+    for k, v in wl.items():
+        if k == old_name:
+            new_wl[new_name] = v
+        else:
+            new_wl[k] = v
+    save_watchlist(new_wl)
+
+
 WATCHLIST = load_watchlist()
 
 # =========================================================================

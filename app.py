@@ -513,21 +513,45 @@ for sect_idx, sector in enumerate(sector_keys):
     stocks = all_results[sector]
     sector_display = sector.replace("_", " ")
 
-    # 섹터 헤더 + 순서 변경 버튼
+    # 섹터 헤더 + 순서 변경 + 이름 변경
     hdr_col1, hdr_col2, hdr_col3 = st.columns([10, 1, 1])
     with hdr_col1:
-        st.markdown(f'<div class="sector-header">{sector_display}</div>', unsafe_allow_html=True)
+        # 섹터명 변경 (popover)
+        with st.popover(sector_display, use_container_width=True):
+            new_name = st.text_input("섹터명 변경:", value=sector_display, key=f"rename_{sector}")
+            new_name_key = new_name.strip().replace(" ", "_")
+            if st.button("변경", key=f"rename_btn_{sector}"):
+                if new_name_key and new_name_key != sector:
+                    config.rename_sector(sector, new_name_key)
+                    config.WATCHLIST = config.load_watchlist()
+                    if "all_results" in st.session_state:
+                        ar = st.session_state.all_results
+                        if sector in ar:
+                            ar[new_name_key] = ar.pop(sector)
+                            st.session_state.all_results = ar
+                    st.rerun()
     with hdr_col2:
         if sect_idx > 0:
             if st.button("⬆", key=f"up_{sector}", help="위로 이동"):
                 config.move_sector(sector, "up")
                 config.WATCHLIST = config.load_watchlist()
+                # session_state 순서도 업데이트
+                if "all_results" in st.session_state:
+                    wl = config.load_watchlist()
+                    ar = st.session_state.all_results
+                    reordered = {k: ar[k] for k in wl if k in ar}
+                    st.session_state.all_results = reordered
                 st.rerun()
     with hdr_col3:
         if sect_idx < len(sector_keys) - 1:
             if st.button("⬇", key=f"down_{sector}", help="아래로 이동"):
                 config.move_sector(sector, "down")
                 config.WATCHLIST = config.load_watchlist()
+                if "all_results" in st.session_state:
+                    wl = config.load_watchlist()
+                    ar = st.session_state.all_results
+                    reordered = {k: ar[k] for k in wl if k in ar}
+                    st.session_state.all_results = reordered
                 st.rerun()
 
     def _signal_badge(sig):
