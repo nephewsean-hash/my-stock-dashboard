@@ -369,7 +369,15 @@ def render_signal_card(info: dict):
     name = info["name"]
     tkr = info["ticker"]
     cp = info.get("current_price")
-    change = info.get("change_pct", 0)
+    try:
+        cp = int(cp) if cp is not None else None
+    except (ValueError, TypeError):
+        cp = None
+    raw_change = info.get("change_pct")
+    try:
+        change = float(raw_change) if raw_change is not None else 0.0
+    except (ValueError, TypeError):
+        change = 0.0
     reason = info.get("signal_reason", "")
 
     # 전일가 계산
@@ -377,6 +385,10 @@ def render_signal_card(info: dict):
 
     # 목표가 정보
     tp = info.get("target_price")
+    try:
+        tp = int(tp) if tp is not None else None
+    except (ValueError, TypeError):
+        tp = None
     tp_count = info.get("target_broker_count", 0)
     tp_date = info.get("target_date", "")
     tp_opinion = info.get("target_opinion", "")
@@ -400,7 +412,8 @@ def render_signal_card(info: dict):
     # 첫줄: 전일가 / 현재가 / 등락률
     if cp:
         change_color = "🔴" if change > 0 else ("🔵" if change < 0 else "⚪")
-        price_line = f"{change_color} 전일 {prev_price:,}원 → 현재 **{cp:,}원** ({change:+.2f}%)"
+        prev_str = f"{prev_price:,}" if prev_price else "?"
+        price_line = f"{change_color} 전일 {prev_str}원 → 현재 **{cp:,}원** ({change:+.2f}%)"
         if tp and cp:
             gap = ((tp - cp) / cp) * 100
             price_line += f" | 목표가 대비 {gap:+.1f}%"
