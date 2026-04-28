@@ -174,17 +174,7 @@ with col_b:
     else:
         st.caption("📌 데이터 출처: pykrx (KRX/네이버, 전일 종가 기준)")
 with col_c:
-    # 삭제 대기열 초기화
-    if "pending_deletes" not in st.session_state:
-        st.session_state.pending_deletes = set()
-    pending = st.session_state.pending_deletes
-
     if st.button("🔄 새로고침"):
-        # 대기열에 있는 종목 실제 삭제
-        if pending:
-            for tkr in pending:
-                config.remove_stock(tkr)
-            st.session_state.pending_deletes = set()
         st.cache_data.clear()
         config.WATCHLIST = config.load_watchlist()
         st.rerun()
@@ -626,22 +616,17 @@ for sect_idx, sector in enumerate(sector_keys):
         },
     )
 
-    # 빠른 삭제 — 클릭하면 삭제 대기열에 추가, 새로고침 시 실제 반영
+    # 빠른 삭제 — 즉시 삭제 (JSON 저장 + 화면에서 제거, 전체 새로고침 없음)
     stock_names = [(t, i["name"]) for t, i in stocks.items() if is_valid_ticker(t)]
-    pending = st.session_state.get("pending_deletes", set())
     if stock_names:
         cols = st.columns(min(len(stock_names), 6))
         for idx, (tkr, nm) in enumerate(stock_names):
             col_idx = idx % min(len(stock_names), 6)
             with cols[col_idx]:
-                if tkr in pending:
-                    st.button(f"↩ ~~{nm}~~", key=f"undel_{sector}_{tkr}",
-                              on_click=lambda t=tkr: st.session_state.pending_deletes.discard(t))
-                else:
-                    st.button(f"🗑 {nm}", key=f"del_{sector}_{tkr}",
-                              on_click=lambda t=tkr: st.session_state.pending_deletes.add(t))
-        if pending:
-            st.info(f"🗑️ {len(pending)}개 종목 삭제 대기 중 — 상단 **새로고침** 버튼을 누르면 반영됩니다.")
+                if st.button(f"🗑 {nm}", key=f"del_{sector}_{tkr}"):
+                    config.remove_stock(tkr)
+                    config.WATCHLIST = config.load_watchlist()
+                    st.rerun()
 
     # 종목별 최신뉴스 (펼치기)
     news_items = []
